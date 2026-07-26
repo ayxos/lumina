@@ -1,0 +1,6 @@
+# Copy to docker-compose.override.yml and adjust paths for your host.
+# docker-compose.override.yml is gitignored — never commit local mounts.
+services:
+  lumina:
+    volumes:
+      - /path/to/your/photos:/media/photos:ro

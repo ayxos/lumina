@@ -1,0 +1,16 @@
+{
+  "name": "lumina",
+  "version": "1.0.0",
+  "description": "Lean media gallery browser",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "better-sqlite3": "^11.7.0",
+    "express": "^4.21.2",
+    "mime-types": "^2.1.35",
+    "sharp": "^0.33.5"
+  }
+}

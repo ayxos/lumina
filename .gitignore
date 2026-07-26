@@ -1,0 +1,17 @@
+# Local/runtime (never commit)
+data/
+.env
+node_modules/
+media/
+docker-compose.override.yml
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/

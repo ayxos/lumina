@@ -1,0 +1,17 @@
+services:
+  lumina:
+    build: .
+    container_name: lumina
+    environment:
+      TZ: Europe/Berlin
+      DATA_DIR: /data
+      CONFIG_PATH: /config/settings.json
+    volumes:
+      - ./config:/config
+      - ./data:/data
+      # Add your media folders below (read-only)
+      - ./media:/media/photos:ro
+      # - /path/to/more/media:/media/videos:ro
+    ports:
+      - "3080:3080"
+    restart: unless-stopped

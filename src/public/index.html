@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lumina</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg>
+        <span>Lumina</span>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-item active" data-view="browse">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          Browse
+        </button>
+        <button class="nav-item" data-view="favorites">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 21s-7-4.5-9.5-9C1 9 3.5 5 7 5c2 0 3.5 1.5 5 3 1.5-1.5 3-3 5-3 3.5 0 6 4 3.5 7C19 16.5 12 21 12 21z"/></svg>
+          Favorites
+        </button>
+        <button class="nav-item" data-view="albums">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 6h16v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6z"/><path d="M4 10h16"/></svg>
+          Albums
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <span id="stats-text">—</span>
+        <button class="btn ghost sm" id="rescan-btn" title="Rescan media">↻</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="toolbar">
+        <div class="search-wrap">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/></svg>
+          <input type="search" id="search" placeholder="Search by name…" autocomplete="off">
+        </div>
+        <select id="sort" class="sort-select">
+          <option value="date">Newest first</option>
+          <option value="date_asc">Oldest first</option>
+          <option value="name">Name A–Z</option>
+          <option value="name_desc">Name Z–A</option>
+          <option value="size">Largest first</option>
+          <option value="size_asc">Smallest first</option>
+        </select>
+        <button type="button" class="btn ghost sm filter-toggle" id="filter-toggle" aria-label="Open filters">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+          <span>Filters</span>
+          <span class="filter-badge" id="filter-badge" hidden>0</span>
+        </button>
+        <div class="toolbar-actions" id="selection-bar" hidden>
+          <span id="selection-count">0 selected</span>
+          <button class="btn sm" id="add-to-album-btn">Add to album</button>
+          <button class="btn ghost sm" id="clear-selection">Clear</button>
+        </div>
+      </header>
+
+      <div class="content">
+        <div id="view-browse" class="view active">
+          <div id="grid" class="grid"></div>
+          <div id="empty-state" class="empty" hidden>
+            <p>No media found</p>
+            <span>Try adjusting filters or check your folder settings</span>
+          </div>
+          <div id="loader" class="loader" hidden></div>
+        </div>
+
+        <div id="view-favorites" class="view">
+          <div id="fav-grid" class="grid"></div>
+        </div>
+
+        <div id="view-albums" class="view">
+          <div class="albums-header">
+            <h2>Your albums</h2>
+            <button class="btn" id="new-album-btn">+ New album</button>
+          </div>
+          <div id="albums-list" class="albums-list"></div>
+          <div id="album-detail" class="album-detail" hidden>
+            <div class="album-detail-header">
+              <button class="btn ghost sm" id="back-albums">← Albums</button>
+              <div class="album-detail-title">
+                <h2 id="album-detail-name"></h2>
+                <span id="album-detail-count"></span>
+              </div>
+              <button class="btn sm" id="download-album-btn">Download ZIP</button>
+            </div>
+            <div id="album-grid" class="grid"></div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Lightbox -->
+  <div id="lightbox" class="lightbox" hidden>
+    <button class="lightbox-close" id="lb-close">×</button>
+    <button class="lightbox-nav prev" id="lb-prev">‹</button>
+    <button class="lightbox-nav next" id="lb-next">›</button>
+    <div class="lightbox-content" id="lb-content"></div>
+    <div class="lightbox-meta" id="lb-meta"></div>
+    <div class="lightbox-actions">
+      <button class="btn ghost" id="lb-fav">♥ Favorite</button>
+      <button class="btn ghost" id="lb-album">+ Album</button>
+      <a class="btn ghost" id="lb-download" download>↓ Download</a>
+    </div>
+  </div>
+
+  <!-- Modal -->
+  <div id="modal" class="modal" hidden>
+    <div class="modal-backdrop" id="modal-backdrop"></div>
+    <div class="modal-box">
+      <h3 id="modal-title"></h3>
+      <div id="modal-body"></div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="modal-cancel">Cancel</button>
+        <button class="btn" id="modal-confirm">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="filters-backdrop" class="filters-backdrop" hidden></div>
+
+  <aside class="filters" id="filters-panel">
+    <h3 class="filters-title">Filters</h3>
+    <div class="filters-drawer-header">
+      <h3>Filters</h3>
+      <button type="button" class="filters-close" id="filters-close" aria-label="Close filters">×</button>
+    </div>
+
+    <div class="filters-body">
+      <label class="field">
+        <span>Folder</span>
+        <select id="filter-folder"><option value="">All folders</option></select>
+      </label>
+
+      <label class="field">
+        <span>Type</span>
+        <select id="filter-type">
+          <option value="">All types</option>
+          <option value="image">Images</option>
+          <option value="video">Videos</option>
+          <option value="audio">Audio</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Format</span>
+        <select id="filter-format"><option value="">All formats</option></select>
+      </label>
+
+      <label class="field">
+        <span>Year</span>
+        <select id="filter-year"><option value="">All years</option></select>
+      </label>
+
+      <label class="field">
+        <span>From</span>
+        <input type="date" id="filter-date-from">
+      </label>
+
+      <label class="field">
+        <span>To</span>
+        <input type="date" id="filter-date-to">
+      </label>
+
+      <label class="field">
+        <span>Min size (KB)</span>
+        <input type="number" id="filter-size-min" placeholder="0" min="0">
+      </label>
+
+      <label class="field">
+        <span>Max size (MB)</span>
+        <input type="number" id="filter-size-max" placeholder="∞" min="0">
+      </label>
+
+      <button class="btn ghost full" id="clear-filters">Clear filters</button>
+    </div>
+  </aside>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

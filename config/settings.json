@@ -1,0 +1,15 @@
+{
+  "mediaPaths": [
+    {
+      "name": "Photos",
+      "path": "/media/photos"
+    }
+  ],
+  "scanIntervalMinutes": 60,
+  "thumbnailSize": 320,
+  "allowedExtensions": [
+    "jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "tiff", "tif", "heic", "heif",
+    "mp4", "webm", "mov", "avi", "mkv", "m4v",
+    "mp3", "flac", "wav", "ogg", "m4a", "aac"
+  ]
+}
