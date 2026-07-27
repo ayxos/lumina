@@ -1,8 +1,13 @@
 # Lumina
 
-A lean, self-hosted media browser for folders you already have. No database server, no upload pipeline, no bloat — point it at your photo and video directories and browse, filter, favorite, and curate albums with a clean modern UI.
+**Browse photos and videos on disk.** One Docker container, read-only folders, no Immich complexity.
+
+A lean self-hosted gallery for libraries you already have — filter, favorite, album, and ZIP export without a database server or upload pipeline.
 
 ![Lumina browse view](docs/screenshots/lumina-hero.png)
+
+[![Docker image](https://github.com/ayxos/lumina/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/ayxos/lumina/actions/workflows/docker-publish.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ## Why Lumina?
 
@@ -33,14 +38,26 @@ Immich and Piwigo are powerful, but often overkill if you just want to **explore
 
 ## Quick start
 
-### 1. Clone
+### Option A — Pre-built image (recommended)
 
 ```bash
 git clone https://github.com/ayxos/lumina.git
 cd lumina
+mkdir -p media data
+docker compose up -d
 ```
 
-### 2. Add your media
+Uses `ghcr.io/ayxos/lumina:latest` — no build step.
+
+### Option B — Build from source
+
+```bash
+git clone https://github.com/ayxos/lumina.git
+cd lumina
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
+
+### 1. Add your media
 
 ```bash
 mkdir -p media
@@ -48,7 +65,7 @@ mkdir -p media
 # ln -s /path/to/photos media/photos
 ```
 
-### 3. Configure folders
+### 2. Configure folders
 
 Edit `config/settings.json`:
 
@@ -64,20 +81,19 @@ Edit `config/settings.json`:
 
 Paths must match **container** paths (right side of Docker volume mounts).
 
-### 4. Run
+### 3. Open
 
-```bash
-docker compose up -d --build
-```
+**http://localhost:3080**
 
-Open **http://localhost:3080**
+> **First time using GHCR?** The image is public. If pull fails, run:  
+> `docker pull ghcr.io/ayxos/lumina:latest`
 
 ## Docker Compose
 
 ```yaml
 services:
   lumina:
-    build: .
+    image: ghcr.io/ayxos/lumina:latest
     ports:
       - "3080:3080"
     volumes:

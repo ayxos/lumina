@@ -1,0 +1,6 @@
+# Optional: build locally instead of pulling from GHCR
+# Usage: docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+services:
+  lumina:
+    build: .
+    image: lumina:local

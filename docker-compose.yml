@@ -1,6 +1,6 @@
 services:
   lumina:
-    build: .
+    image: ghcr.io/ayxos/lumina:latest
     container_name: lumina
     environment:
       TZ: Europe/Berlin
