@@ -10,6 +10,7 @@ const {
   getScanStatus,
   generateThumbnail,
   buildMediaQuery,
+  backupDatabase,
   IMAGE_EXT,
   THUMB_DIR,
 } = require('./scanner');
@@ -85,8 +86,8 @@ app.get('/api/media', (req, res) => {
 
 app.get('/api/media/:id', (req, res) => {
   const row = db.prepare(`
-    SELECT m.*, CASE WHEN f.media_id IS NOT NULL THEN 1 ELSE 0 END AS is_favorite
-    FROM media m LEFT JOIN favorites f ON f.media_id = m.id
+    SELECT m.*, CASE WHEN f.media_path IS NOT NULL THEN 1 ELSE 0 END AS is_favorite
+    FROM media m LEFT JOIN favorites f ON f.media_path = m.path
     WHERE m.id = ?
   `).get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Not found' });
@@ -158,21 +159,21 @@ app.get('/api/media/:id/thumb', async (req, res) => {
 });
 
 app.post('/api/favorites/:id', (req, res) => {
-  const row = db.prepare('SELECT id FROM media WHERE id = ?').get(req.params.id);
+  const row = db.prepare('SELECT id, path FROM media WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Not found' });
-  const existing = db.prepare('SELECT media_id FROM favorites WHERE media_id = ?').get(req.params.id);
+  const existing = db.prepare('SELECT media_path FROM favorites WHERE media_path = ?').get(row.path);
   if (existing) {
-    db.prepare('DELETE FROM favorites WHERE media_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM favorites WHERE media_path = ?').run(row.path);
     return res.json({ is_favorite: false });
   }
-  db.prepare('INSERT INTO favorites (media_id) VALUES (?)').run(req.params.id);
+  db.prepare('INSERT INTO favorites (media_path) VALUES (?)').run(row.path);
   res.json({ is_favorite: true });
 });
 
 app.get('/api/favorites', (_req, res) => {
   const items = db.prepare(`
     SELECT m.*, 1 AS is_favorite
-    FROM favorites f JOIN media m ON m.id = f.media_id
+    FROM favorites f JOIN media m ON m.path = f.media_path
     ORDER BY f.created_at DESC
   `).all();
   res.json(items);
@@ -180,7 +181,7 @@ app.get('/api/favorites', (_req, res) => {
 
 app.get('/api/albums', (_req, res) => {
   const albums = db.prepare(`
-    SELECT a.*, COUNT(ai.media_id) AS item_count
+    SELECT a.*, COUNT(ai.media_path) AS item_count
     FROM albums a LEFT JOIN album_items ai ON ai.album_id = a.id
     GROUP BY a.id ORDER BY a.updated_at DESC
   `).all();
@@ -199,10 +200,10 @@ app.get('/api/albums/:id', (req, res) => {
   const album = db.prepare('SELECT * FROM albums WHERE id = ?').get(req.params.id);
   if (!album) return res.status(404).json({ error: 'Not found' });
   const items = db.prepare(`
-    SELECT m.*, CASE WHEN f.media_id IS NOT NULL THEN 1 ELSE 0 END AS is_favorite
+    SELECT m.*, CASE WHEN f.media_path IS NOT NULL THEN 1 ELSE 0 END AS is_favorite
     FROM album_items ai
-    JOIN media m ON m.id = ai.media_id
-    LEFT JOIN favorites f ON f.media_id = m.id
+    JOIN media m ON m.path = ai.media_path
+    LEFT JOIN favorites f ON f.media_path = m.path
     WHERE ai.album_id = ?
     ORDER BY ai.sort_order, ai.added_at
   `).all(req.params.id);
@@ -229,18 +230,23 @@ app.post('/api/albums/:id/items', (req, res) => {
   if (!album) return res.status(404).json({ error: 'Album not found' });
   const ids = Array.isArray(req.body.mediaIds) ? req.body.mediaIds : [];
   if (!ids.length) return res.status(400).json({ error: 'mediaIds required' });
+  const mediaRows = db.prepare(
+    `SELECT id, path FROM media WHERE id IN (${ids.map(() => '?').join(',')})`
+  ).all(...ids);
   const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM album_items WHERE album_id = ?').get(req.params.id).m;
-  const insert = db.prepare('INSERT OR IGNORE INTO album_items (album_id, media_id, sort_order) VALUES (?, ?, ?)');
-  const tx = db.transaction((mediaIds) => {
-    mediaIds.forEach((mid, i) => insert.run(req.params.id, mid, maxOrder + i + 1));
+  const insert = db.prepare('INSERT OR IGNORE INTO album_items (album_id, media_path, sort_order) VALUES (?, ?, ?)');
+  const tx = db.transaction((rows) => {
+    rows.forEach((row, i) => insert.run(req.params.id, row.path, maxOrder + i + 1));
   });
-  tx(ids);
+  tx(mediaRows);
   db.prepare('UPDATE albums SET updated_at = strftime(\'%s\', \'now\') WHERE id = ?').run(req.params.id);
   res.json({ added: ids.length });
 });
 
 app.delete('/api/albums/:id/items/:mediaId', (req, res) => {
-  db.prepare('DELETE FROM album_items WHERE album_id = ? AND media_id = ?').run(req.params.id, req.params.mediaId);
+  const row = db.prepare('SELECT path FROM media WHERE id = ?').get(req.params.mediaId);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  db.prepare('DELETE FROM album_items WHERE album_id = ? AND media_path = ?').run(req.params.id, row.path);
   db.prepare('UPDATE albums SET updated_at = strftime(\'%s\', \'now\') WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
@@ -249,7 +255,7 @@ app.get('/api/albums/:id/download', (req, res) => {
   const album = db.prepare('SELECT * FROM albums WHERE id = ?').get(req.params.id);
   if (!album) return res.status(404).json({ error: 'Not found' });
   const items = db.prepare(`
-    SELECT m.path, m.name FROM album_items ai JOIN media m ON m.id = ai.media_id
+    SELECT m.path, m.name FROM album_items ai JOIN media m ON m.path = ai.media_path
     WHERE ai.album_id = ? ORDER BY ai.sort_order, ai.added_at
   `).all(req.params.id);
   if (!items.length) return res.status(400).json({ error: 'Album is empty' });
@@ -289,14 +295,22 @@ if (!fs.existsSync(THUMB_DIR)) fs.mkdirSync(THUMB_DIR, { recursive: true });
 app.listen(PORT, () => {
   console.log(`Lumina running on http://0.0.0.0:${PORT}`);
   try {
+    backupDatabase('startup');
     const config = loadConfig();
     console.log(`Media sources: ${(config.mediaPaths || []).map((p) => p.name).join(', ') || 'none'}`);
     const result = scanMedia(config);
-    console.log(`Initial scan: ${result.total} files indexed`);
+    if (result.status === 'skipped') {
+      console.warn(`Initial scan skipped (${result.reason}) — library unchanged`);
+    } else {
+      console.log(`Initial scan: ${result.total} files indexed`);
+    }
     const interval = (config.scanIntervalMinutes || 60) * 60 * 1000;
     setInterval(() => {
       console.log('Running scheduled scan...');
-      scanMedia(loadConfig());
+      const scanResult = scanMedia(loadConfig());
+      if (scanResult.status === 'skipped') {
+        console.warn(`Scheduled scan skipped (${scanResult.reason}) — library unchanged`);
+      }
     }, interval);
   } catch (err) {
     console.error('Startup scan failed:', err.message);

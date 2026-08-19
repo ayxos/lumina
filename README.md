@@ -182,6 +182,20 @@ Environment variables:
 - **Thumbnails & metadata** live in `./data`
 - **Videos** — frame extracted at 1s via ffmpeg, cached as WebP
 
+## Data safety
+
+Lumina protects favorites and albums from accidental loss during rescans:
+
+- **Path-based metadata** — favorites and album items are stored by file path, not media ID, so they survive re-indexing
+- **Scan guards** — rescans are skipped when the library appears empty or would delete more than half the index (usually a bad mount)
+- **Automatic DB backups** — SQLite is copied to `data/backups/` on startup and before any file removal (last 5 kept)
+
+**Docker Compose tips:**
+
+- Use `docker compose up -d` (override files are merged automatically)
+- Do **not** run `docker compose -f docker-compose.yml up -d` alone — that skips `docker-compose.override.yml`
+- Symlink `./media` to your photo library as a fallback, or copy `docker-compose.override.example.yml` → `docker-compose.override.yml`
+
 ## Development
 
 ```bash

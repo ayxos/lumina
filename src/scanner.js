@@ -8,7 +8,10 @@ const db = require('./db');
 const execFileAsync = promisify(execFile);
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+const DB_PATH = path.join(DATA_DIR, 'lumina.db');
 const THUMB_DIR = path.join(DATA_DIR, 'thumbnails');
+const BACKUP_DIR = path.join(DATA_DIR, 'backups');
+const MAX_DB_BACKUPS = 5;
 
 const IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'tif', 'heic', 'heif']);
 const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'avi', 'mkv', 'm4v']);
@@ -127,9 +130,25 @@ async function generateThumbnail(filePath, mediaId, size, mediaType) {
   }
 }
 
+function backupDatabase(reason) {
+  if (!fs.existsSync(DB_PATH)) return;
+  if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const backupPath = path.join(BACKUP_DIR, `lumina-${reason}-${stamp}.db`);
+  fs.copyFileSync(DB_PATH, backupPath);
+  const backups = fs.readdirSync(BACKUP_DIR)
+    .filter((name) => name.endsWith('.db'))
+    .map((name) => ({ name, mtime: fs.statSync(path.join(BACKUP_DIR, name)).mtimeMs }))
+    .sort((a, b) => b.mtime - a.mtime);
+  for (const old of backups.slice(MAX_DB_BACKUPS)) {
+    fs.unlinkSync(path.join(BACKUP_DIR, old.name));
+  }
+}
+
 function scanMedia(config) {
   if (scanning) return { status: 'already_running' };
   scanning = true;
+  const existingCount = db.prepare('SELECT COUNT(*) AS c FROM media').get().c;
   const allowed = new Set((config.allowedExtensions || []).map((e) => e.toLowerCase()));
   const foundPaths = new Set();
   const insert = db.prepare(`
@@ -166,13 +185,42 @@ function scanMedia(config) {
     total += batch.length;
   }
 
+  if (total === 0 && existingCount > 0) {
+    scanning = false;
+    console.warn(`Scan skipped: found 0 files but database has ${existingCount} — check media mount`);
+    return {
+      status: 'skipped',
+      reason: 'empty_scan_with_existing_media',
+      total: existingCount,
+      removed: 0,
+      scannedAt: lastScan,
+    };
+  }
+
   const existing = db.prepare('SELECT id, path FROM media').all();
-  const remove = db.prepare('DELETE FROM media WHERE id = ?');
-  const removeTx = db.transaction((ids) => {
-    for (const id of ids) remove.run(id);
-  });
   const staleIds = existing.filter((r) => !foundPaths.has(r.path)).map((r) => r.id);
-  if (staleIds.length) removeTx(staleIds);
+  if (staleIds.length && existingCount > 0) {
+    const removeRatio = staleIds.length / existingCount;
+    if (removeRatio > 0.5 && existingCount >= 10) {
+      scanning = false;
+      console.warn(
+        `Scan skipped: would remove ${staleIds.length}/${existingCount} files — check media mount`
+      );
+      return {
+        status: 'skipped',
+        reason: 'suspicious_mass_removal',
+        total: existingCount,
+        removed: 0,
+        scannedAt: lastScan,
+      };
+    }
+    backupDatabase('pre-removal');
+    const remove = db.prepare('DELETE FROM media WHERE id = ?');
+    const removeTx = db.transaction((ids) => {
+      for (const id of ids) remove.run(id);
+    });
+    removeTx(staleIds);
+  }
 
   lastScan = new Date().toISOString();
   scanning = false;
@@ -224,7 +272,7 @@ function buildMediaQuery(filters) {
     params.sizeMax = parseInt(filters.sizeMax, 10);
   }
   if (filters.favorite === 'true' || filters.favorite === '1') {
-    clauses.push('f.media_id IS NOT NULL');
+    clauses.push('f.media_path IS NOT NULL');
   }
 
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
@@ -244,12 +292,12 @@ function buildMediaQuery(filters) {
   params.offset = offset;
 
   const from = filters.favorite === 'true' || filters.favorite === '1'
-    ? 'FROM media m INNER JOIN favorites f ON f.media_id = m.id'
-    : 'FROM media m LEFT JOIN favorites f ON f.media_id = m.id';
+    ? 'FROM media m INNER JOIN favorites f ON f.media_path = m.path'
+    : 'FROM media m LEFT JOIN favorites f ON f.media_path = m.path';
 
   const countSql = `SELECT COUNT(*) AS total ${from} ${where}`;
   const dataSql = `
-    SELECT m.*, CASE WHEN f.media_id IS NOT NULL THEN 1 ELSE 0 END AS is_favorite
+    SELECT m.*, CASE WHEN f.media_path IS NOT NULL THEN 1 ELSE 0 END AS is_favorite
     ${from} ${where}
     ORDER BY ${order}
     LIMIT @limit OFFSET @offset
@@ -266,6 +314,7 @@ module.exports = {
   buildMediaQuery,
   extractNameYear,
   getMediaType,
+  backupDatabase,
   IMAGE_EXT,
   THUMB_DIR,
 };

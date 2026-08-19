@@ -4,6 +4,7 @@ data/
 node_modules/
 media/
 docker-compose.override.yml
+data/backups/
 
 # SQLite
 *.db

@@ -9,7 +9,8 @@ services:
     volumes:
       - ./config:/config
       - ./data:/data
-      # Add your media folders below (read-only)
+      # Add your media folder (or symlink ./media → your library). See docker-compose.override.example.yml.
+      # Always run `docker compose up -d` — passing `-f docker-compose.yml` alone skips override files.
       - ./media:/media/photos:ro
       # - /path/to/more/media:/media/videos:ro
     ports:

@@ -1,6 +1,9 @@
 # Copy to docker-compose.override.yml and adjust paths for your host.
 # docker-compose.override.yml is gitignored — never commit local mounts.
+# List all volumes here so a partial override replaces the default ./media mount.
 services:
   lumina:
     volumes:
+      - ./config:/config
+      - ./data:/data
       - /path/to/your/photos:/media/photos:ro
