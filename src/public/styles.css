@@ -663,15 +663,34 @@ body {
 }
 
 .album-picker-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
   padding: 10px 14px;
   cursor: pointer;
+  font: inherit;
   font-size: 0.88rem;
-  border-bottom: 1px solid var(--border);
+  color: inherit;
   transition: background .1s;
 }
 
 .album-picker-item:last-child { border-bottom: none; }
 .album-picker-item:hover { background: var(--accent-soft); }
+.album-picker-item.selected {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.modal-hint {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin: -8px 0 12px;
+}
 
 /* Toast */
 .toast {

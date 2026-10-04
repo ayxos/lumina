@@ -20,7 +20,15 @@ const app = express();
 const PORT = process.env.PORT || 3080;
 
 app.use(express.json({ limit: '1mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  etag: true,
+  lastModified: true,
+  setHeaders(res, filePath) {
+    if (/\.(js|css|html)$/.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  },
+}));
 
 function getConfigSafe() {
   try {
@@ -255,6 +263,9 @@ app.post('/api/albums/:id/items', (req, res) => {
     db.prepare('UPDATE albums SET updated_at = strftime(\'%s\', \'now\') WHERE id = ?').run(req.params.id);
     db.flush();
   }
+  console.log(
+    `Album ${req.params.id} add: requested=${ids.length} matched=${mediaRows.length} added=${added} skipped=${mediaRows.length - added}`
+  );
   res.json({ added, skipped: mediaRows.length - added, requested: ids.length });
 });
 

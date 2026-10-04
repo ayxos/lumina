@@ -405,18 +405,26 @@ function closeLightbox() {
   els.lbContent.innerHTML = '';
 }
 
-function showModal(title, bodyHtml, onConfirm) {
+function showModal(title, bodyHtml, onConfirm, opts = {}) {
+  const { hideConfirm = false, confirmLabel = 'Confirm' } = opts;
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = bodyHtml;
   els.modal.hidden = false;
   const confirm = $('#modal-confirm');
   const cancel = $('#modal-cancel');
-  confirm.hidden = false;
-  const cleanup = () => { els.modal.hidden = true; confirm.onclick = null; confirm.hidden = false; };
+  confirm.hidden = hideConfirm;
+  confirm.textContent = confirmLabel;
+  const cleanup = () => {
+    els.modal.hidden = true;
+    confirm.onclick = null;
+    confirm.hidden = false;
+    confirm.textContent = 'Confirm';
+  };
   cancel.onclick = cleanup;
   $('#modal-backdrop').onclick = cleanup;
   confirm.onclick = async () => {
-    await onConfirm();
+    const result = await onConfirm();
+    if (result === false) return;
     cleanup();
   };
 }
@@ -426,6 +434,10 @@ function toastAlbumAddResult(res, mode = 'add') {
   const skipped = res?.skipped ?? 0;
   if (added === 0 && skipped > 0) {
     toast(skipped === 1 ? 'Already in album' : `All ${skipped} already in album`);
+    return;
+  }
+  if (added === 0) {
+    toast('Nothing was added');
     return;
   }
   const verb = mode === 'copy' ? 'Copied' : mode === 'move' ? 'Moved' : 'Added';
@@ -440,19 +452,35 @@ async function refreshAfterAlbumChange(targetAlbumId) {
   }
 }
 
+async function addMediaToAlbum(albumId, mediaIds, mode = 'add') {
+  const res = await api(`/api/albums/${albumId}/items`, { method: 'POST', body: { mediaIds } });
+  if (mode === 'move' && state.currentAlbum) {
+    await api(`/api/albums/${state.currentAlbum.id}/items/remove`, {
+      method: 'POST',
+      body: { mediaIds },
+    });
+  }
+  toastAlbumAddResult(res, mode);
+  clearSelection();
+  if (mode === 'move' && state.currentAlbum) {
+    await openAlbum(state.currentAlbum.id);
+  } else {
+    await refreshAfterAlbumChange(albumId);
+  }
+  return res;
+}
+
 function showNewAlbumModal(mediaIds = []) {
   showModal('New album', '<input id="album-name-input" placeholder="Album name" autofocus>', async () => {
     const name = $('#album-name-input').value.trim();
     if (!name) return toast('Name required');
     const album = await api('/api/albums', { method: 'POST', body: { name } });
     if (mediaIds.length) {
-      const res = await api(`/api/albums/${album.id}/items`, { method: 'POST', body: { mediaIds } });
-      toastAlbumAddResult(res, 'add');
+      await addMediaToAlbum(album.id, mediaIds, 'add');
     } else {
       toast(`Album "${name}" created`);
+      await loadAlbums();
     }
-    clearSelection();
-    await loadAlbums();
     if (state.view !== 'albums') switchView('albums');
   });
   setTimeout(() => $('#album-name-input')?.focus(), 50);
@@ -461,63 +489,54 @@ function showNewAlbumModal(mediaIds = []) {
 async function showAlbumPickerModal(mediaIds, { mode = 'add', excludeAlbumId = null } = {}) {
   const albums = state.albums.filter((a) => String(a.id) !== String(excludeAlbumId));
   if (!albums.length) {
-    showModal('New album', '<input id="album-name-input" placeholder="Album name" autofocus>', async () => {
-      const name = $('#album-name-input').value.trim();
-      if (!name) return toast('Name required');
-      const album = await api('/api/albums', { method: 'POST', body: { name } });
-      const res = await api(`/api/albums/${album.id}/items`, { method: 'POST', body: { mediaIds } });
-      if (mode === 'move' && state.currentAlbum) {
-        await api(`/api/albums/${state.currentAlbum.id}/items/remove`, {
-          method: 'POST',
-          body: { mediaIds },
-        });
-        toastAlbumAddResult({ ...res, added: res.added }, 'move');
-        clearSelection();
-        openAlbum(state.currentAlbum.id);
-      } else {
-        toastAlbumAddResult(res, mode === 'copy' ? 'copy' : 'add');
-        clearSelection();
-        await refreshAfterAlbumChange(album.id);
-      }
-    });
-    setTimeout(() => $('#album-name-input')?.focus(), 50);
+    showNewAlbumModal(mediaIds);
     return;
   }
+
+  // Only one target album — add immediately (no modal click ambiguity).
+  if (albums.length === 1) {
+    try {
+      await addMediaToAlbum(albums[0].id, mediaIds, mode);
+    } catch (err) {
+      toast(err.message);
+    }
+    return;
+  }
+
   const titles = { add: 'Add to album', copy: 'Copy to album', move: 'Move to album' };
+  let selectedAlbumId = null;
   const items = albums.map((a) =>
-    `<div class="album-picker-item" data-id="${a.id}">${esc(a.name)} (${a.item_count})</div>`
+    `<button type="button" class="album-picker-item" data-id="${a.id}">${esc(a.name)} (${a.item_count})</button>`
   ).join('');
-  const confirmBtn = $('#modal-confirm');
-  confirmBtn.hidden = true;
-  showModal(titles[mode] || titles.add, `<div class="album-picker">${items}</div>`, async () => {});
-  $$('.album-picker-item').forEach((el) => {
-    el.addEventListener('click', async () => {
-      const albumId = el.dataset.id;
+
+  showModal(
+    titles[mode] || titles.add,
+    `<p class="modal-hint">Select an album, then confirm</p><div class="album-picker">${items}</div>`,
+    async () => {
+      if (!selectedAlbumId) {
+        toast('Select an album first');
+        return false;
+      }
       try {
-        const res = await api(`/api/albums/${albumId}/items`, { method: 'POST', body: { mediaIds } });
-        if (mode === 'move' && state.currentAlbum) {
-          await api(`/api/albums/${state.currentAlbum.id}/items/remove`, {
-            method: 'POST',
-            body: { mediaIds },
-          });
-          toastAlbumAddResult(res, 'move');
-          clearSelection();
-          openAlbum(state.currentAlbum.id);
-        } else {
-          toastAlbumAddResult(res, mode === 'copy' ? 'copy' : 'add');
-          clearSelection();
-          await refreshAfterAlbumChange(albumId);
-        }
-        els.modal.hidden = true;
-        confirmBtn.hidden = false;
+        await addMediaToAlbum(selectedAlbumId, mediaIds, mode);
       } catch (err) {
         toast(err.message);
+        return false;
       }
+    },
+    { confirmLabel: mode === 'move' ? 'Move' : mode === 'copy' ? 'Copy' : 'Add' }
+  );
+
+  $$('.album-picker-item').forEach((el) => {
+    el.addEventListener('click', () => {
+      selectedAlbumId = el.dataset.id;
+      $$('.album-picker-item').forEach((item) => item.classList.toggle('selected', item === el));
     });
   });
 }
 
 async function showAddToAlbumModal(mediaIds) {
+  if (!mediaIds?.length) return toast('No files selected');
   if (!state.albums.length) await loadAlbums();
   if (!state.albums.length) {
     showNewAlbumModal(mediaIds);
