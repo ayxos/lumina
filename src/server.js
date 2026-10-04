@@ -234,20 +234,28 @@ app.delete('/api/albums/:id', (req, res) => {
 app.post('/api/albums/:id/items', (req, res) => {
   const album = db.prepare('SELECT id FROM albums WHERE id = ?').get(req.params.id);
   if (!album) return res.status(404).json({ error: 'Album not found' });
-  const ids = Array.isArray(req.body.mediaIds) ? req.body.mediaIds : [];
+  const ids = (Array.isArray(req.body.mediaIds) ? req.body.mediaIds : [])
+    .map((id) => parseInt(id, 10))
+    .filter((id) => Number.isFinite(id));
   if (!ids.length) return res.status(400).json({ error: 'mediaIds required' });
   const mediaRows = db.prepare(
     `SELECT id, path FROM media WHERE id IN (${ids.map(() => '?').join(',')})`
   ).all(...ids);
   const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM album_items WHERE album_id = ?').get(req.params.id).m;
   const insert = db.prepare('INSERT OR IGNORE INTO album_items (album_id, media_path, sort_order) VALUES (?, ?, ?)');
+  let added = 0;
   const tx = db.transaction((rows) => {
-    rows.forEach((row, i) => insert.run(req.params.id, row.path, maxOrder + i + 1));
+    rows.forEach((row, i) => {
+      const result = insert.run(req.params.id, row.path, maxOrder + i + 1);
+      added += result.changes;
+    });
   });
   tx(mediaRows);
-  db.prepare('UPDATE albums SET updated_at = strftime(\'%s\', \'now\') WHERE id = ?').run(req.params.id);
-  db.flush();
-  res.json({ added: mediaRows.length });
+  if (added > 0) {
+    db.prepare('UPDATE albums SET updated_at = strftime(\'%s\', \'now\') WHERE id = ?').run(req.params.id);
+    db.flush();
+  }
+  res.json({ added, skipped: mediaRows.length - added, requested: ids.length });
 });
 
 app.post('/api/albums/:id/items/remove', (req, res) => {

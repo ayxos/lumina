@@ -421,16 +421,38 @@ function showModal(title, bodyHtml, onConfirm) {
   };
 }
 
+function toastAlbumAddResult(res, mode = 'add') {
+  const added = res?.added ?? 0;
+  const skipped = res?.skipped ?? 0;
+  if (added === 0 && skipped > 0) {
+    toast(skipped === 1 ? 'Already in album' : `All ${skipped} already in album`);
+    return;
+  }
+  const verb = mode === 'copy' ? 'Copied' : mode === 'move' ? 'Moved' : 'Added';
+  if (skipped > 0) toast(`${verb} ${added}, ${skipped} already in album`);
+  else toast(`${verb} ${added} file${added !== 1 ? 's' : ''}`);
+}
+
+async function refreshAfterAlbumChange(targetAlbumId) {
+  await loadAlbums();
+  if (state.view === 'albums' && state.currentAlbum && String(state.currentAlbum.id) === String(targetAlbumId)) {
+    await openAlbum(state.currentAlbum.id);
+  }
+}
+
 function showNewAlbumModal(mediaIds = []) {
   showModal('New album', '<input id="album-name-input" placeholder="Album name" autofocus>', async () => {
     const name = $('#album-name-input').value.trim();
     if (!name) return toast('Name required');
     const album = await api('/api/albums', { method: 'POST', body: { name } });
     if (mediaIds.length) {
-      await api(`/api/albums/${album.id}/items`, { method: 'POST', body: { mediaIds } });
+      const res = await api(`/api/albums/${album.id}/items`, { method: 'POST', body: { mediaIds } });
+      toastAlbumAddResult(res, 'add');
+    } else {
+      toast(`Album "${name}" created`);
     }
-    toast(`Album "${name}" created`);
-    loadAlbums();
+    clearSelection();
+    await loadAlbums();
     if (state.view !== 'albums') switchView('albums');
   });
   setTimeout(() => $('#album-name-input')?.focus(), 50);
@@ -443,19 +465,19 @@ async function showAlbumPickerModal(mediaIds, { mode = 'add', excludeAlbumId = n
       const name = $('#album-name-input').value.trim();
       if (!name) return toast('Name required');
       const album = await api('/api/albums', { method: 'POST', body: { name } });
-      await api(`/api/albums/${album.id}/items`, { method: 'POST', body: { mediaIds } });
+      const res = await api(`/api/albums/${album.id}/items`, { method: 'POST', body: { mediaIds } });
       if (mode === 'move' && state.currentAlbum) {
         await api(`/api/albums/${state.currentAlbum.id}/items/remove`, {
           method: 'POST',
           body: { mediaIds },
         });
-        toast(`Moved ${mediaIds.length} file(s) to "${name}"`);
+        toastAlbumAddResult({ ...res, added: res.added }, 'move');
         clearSelection();
         openAlbum(state.currentAlbum.id);
       } else {
-        toast(`${mode === 'copy' ? 'Copied' : 'Added'} ${mediaIds.length} file(s) to "${name}"`);
+        toastAlbumAddResult(res, mode === 'copy' ? 'copy' : 'add');
         clearSelection();
-        loadAlbums();
+        await refreshAfterAlbumChange(album.id);
       }
     });
     setTimeout(() => $('#album-name-input')?.focus(), 50);
@@ -472,19 +494,19 @@ async function showAlbumPickerModal(mediaIds, { mode = 'add', excludeAlbumId = n
     el.addEventListener('click', async () => {
       const albumId = el.dataset.id;
       try {
-        await api(`/api/albums/${albumId}/items`, { method: 'POST', body: { mediaIds } });
+        const res = await api(`/api/albums/${albumId}/items`, { method: 'POST', body: { mediaIds } });
         if (mode === 'move' && state.currentAlbum) {
           await api(`/api/albums/${state.currentAlbum.id}/items/remove`, {
             method: 'POST',
             body: { mediaIds },
           });
-          toast(`Moved ${mediaIds.length} file(s)`);
+          toastAlbumAddResult(res, 'move');
           clearSelection();
           openAlbum(state.currentAlbum.id);
         } else {
-          toast(`${mode === 'copy' ? 'Copied' : 'Added'} ${mediaIds.length} file(s) to album`);
+          toastAlbumAddResult(res, mode === 'copy' ? 'copy' : 'add');
           clearSelection();
-          loadAlbums();
+          await refreshAfterAlbumChange(albumId);
         }
         els.modal.hidden = true;
         confirmBtn.hidden = false;
