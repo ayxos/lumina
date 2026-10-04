@@ -184,17 +184,26 @@ Environment variables:
 
 ## Data safety
 
-Lumina protects favorites and albums from accidental loss during rescans:
+Lumina protects favorites and albums from accidental loss:
 
 - **Path-based metadata** — favorites and album items are stored by file path, not media ID, so they survive re-indexing
+- **WAL flush** — album/favorite writes are checkpointed into `lumina.db` immediately (not left only in the WAL sidecar)
 - **Scan guards** — rescans are skipped when the library appears empty or would delete more than half the index (usually a bad mount)
-- **Automatic DB backups** — SQLite is copied to `data/backups/` on startup and before any file removal (last 5 kept)
+- **Automatic DB backups** — SQLite is flushed, then copied to `data/backups/` on startup and before any file removal (last 5 kept)
 
 **Docker Compose tips:**
 
 - Use `docker compose up -d` (override files are merged automatically)
 - Do **not** run `docker compose -f docker-compose.yml up -d` alone — that skips `docker-compose.override.yml`
 - Symlink `./media` to your photo library as a fallback, or copy `docker-compose.override.example.yml` → `docker-compose.override.yml`
+- Run `./scripts/setup.sh /path/to/photos` once on the host so `data/` and `media` exist before the first `docker compose up`
+
+**After reboot:** if photos look missing, the SSD may not have been mounted before Docker started. Lumina waits up to 2 minutes for media paths; ensure your disk mounts before Docker in `/etc/fstab`, then recreate the container:
+
+```bash
+./scripts/setup.sh /path/to/photos
+docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.build.yml up -d --build --force-recreate
+```
 
 ## Development
 

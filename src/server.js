@@ -6,6 +6,7 @@ const mime = require('mime-types');
 const db = require('./db');
 const {
   loadConfig,
+  waitForMediaPaths,
   scanMedia,
   getScanStatus,
   generateThumbnail,
@@ -164,9 +165,11 @@ app.post('/api/favorites/:id', (req, res) => {
   const existing = db.prepare('SELECT media_path FROM favorites WHERE media_path = ?').get(row.path);
   if (existing) {
     db.prepare('DELETE FROM favorites WHERE media_path = ?').run(row.path);
+    db.flush();
     return res.json({ is_favorite: false });
   }
   db.prepare('INSERT INTO favorites (media_path) VALUES (?)').run(row.path);
+  db.flush();
   res.json({ is_favorite: true });
 });
 
@@ -193,6 +196,7 @@ app.post('/api/albums', (req, res) => {
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name required' });
   const result = db.prepare('INSERT INTO albums (name, description) VALUES (?, ?)').run(name.trim(), description.trim());
   const album = db.prepare('SELECT * FROM albums WHERE id = ?').get(result.lastInsertRowid);
+  db.flush();
   res.status(201).json(album);
 });
 
@@ -216,12 +220,14 @@ app.patch('/api/albums/:id', (req, res) => {
   const name = req.body.name !== undefined ? req.body.name.trim() : album.name;
   const description = req.body.description !== undefined ? req.body.description.trim() : album.description;
   db.prepare('UPDATE albums SET name = ?, description = ?, updated_at = strftime(\'%s\', \'now\') WHERE id = ?').run(name, description, req.params.id);
+  db.flush();
   res.json(db.prepare('SELECT * FROM albums WHERE id = ?').get(req.params.id));
 });
 
 app.delete('/api/albums/:id', (req, res) => {
   const result = db.prepare('DELETE FROM albums WHERE id = ?').run(req.params.id);
   if (!result.changes) return res.status(404).json({ error: 'Not found' });
+  db.flush();
   res.json({ ok: true });
 });
 
@@ -240,7 +246,26 @@ app.post('/api/albums/:id/items', (req, res) => {
   });
   tx(mediaRows);
   db.prepare('UPDATE albums SET updated_at = strftime(\'%s\', \'now\') WHERE id = ?').run(req.params.id);
-  res.json({ added: ids.length });
+  db.flush();
+  res.json({ added: mediaRows.length });
+});
+
+app.post('/api/albums/:id/items/remove', (req, res) => {
+  const album = db.prepare('SELECT id FROM albums WHERE id = ?').get(req.params.id);
+  if (!album) return res.status(404).json({ error: 'Album not found' });
+  const ids = Array.isArray(req.body.mediaIds) ? req.body.mediaIds : [];
+  if (!ids.length) return res.status(400).json({ error: 'mediaIds required' });
+  const mediaRows = db.prepare(
+    `SELECT id, path FROM media WHERE id IN (${ids.map(() => '?').join(',')})`
+  ).all(...ids);
+  const del = db.prepare('DELETE FROM album_items WHERE album_id = ? AND media_path = ?');
+  const tx = db.transaction((rows) => {
+    rows.forEach((row) => del.run(req.params.id, row.path));
+  });
+  tx(mediaRows);
+  db.prepare('UPDATE albums SET updated_at = strftime(\'%s\', \'now\') WHERE id = ?').run(req.params.id);
+  db.flush();
+  res.json({ removed: mediaRows.length });
 });
 
 app.delete('/api/albums/:id/items/:mediaId', (req, res) => {
@@ -248,19 +273,16 @@ app.delete('/api/albums/:id/items/:mediaId', (req, res) => {
   if (!row) return res.status(404).json({ error: 'Not found' });
   db.prepare('DELETE FROM album_items WHERE album_id = ? AND media_path = ?').run(req.params.id, row.path);
   db.prepare('UPDATE albums SET updated_at = strftime(\'%s\', \'now\') WHERE id = ?').run(req.params.id);
+  db.flush();
   res.json({ ok: true });
 });
 
-app.get('/api/albums/:id/download', (req, res) => {
-  const album = db.prepare('SELECT * FROM albums WHERE id = ?').get(req.params.id);
-  if (!album) return res.status(404).json({ error: 'Not found' });
-  const items = db.prepare(`
-    SELECT m.path, m.name FROM album_items ai JOIN media m ON m.path = ai.media_path
-    WHERE ai.album_id = ? ORDER BY ai.sort_order, ai.added_at
-  `).all(req.params.id);
-  if (!items.length) return res.status(400).json({ error: 'Album is empty' });
-
-  const safeName = album.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+function streamMediaZip(res, items, filename) {
+  if (!items.length) {
+    res.status(400).json({ error: 'No files to download' });
+    return;
+  }
+  const safeName = filename.replace(/[^a-zA-Z0-9_-]/g, '_') || 'download';
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader('Content-Disposition', `attachment; filename="${safeName}.zip"`);
 
@@ -284,6 +306,25 @@ app.get('/api/albums/:id/download', (req, res) => {
     archive.file(item.path, { name: entryName });
   }
   archive.finalize();
+}
+
+app.get('/api/albums/:id/download', (req, res) => {
+  const album = db.prepare('SELECT * FROM albums WHERE id = ?').get(req.params.id);
+  if (!album) return res.status(404).json({ error: 'Not found' });
+  const items = db.prepare(`
+    SELECT m.path, m.name FROM album_items ai JOIN media m ON m.path = ai.media_path
+    WHERE ai.album_id = ? ORDER BY ai.sort_order, ai.added_at
+  `).all(req.params.id);
+  streamMediaZip(res, items, album.name);
+});
+
+app.post('/api/media/download', (req, res) => {
+  const ids = Array.isArray(req.body.mediaIds) ? req.body.mediaIds : [];
+  if (!ids.length) return res.status(400).json({ error: 'mediaIds required' });
+  const items = db.prepare(
+    `SELECT path, name FROM media WHERE id IN (${ids.map(() => '?').join(',')})`
+  ).all(...ids);
+  streamMediaZip(res, items, 'selection');
 });
 
 app.get('*', (_req, res) => {
@@ -292,12 +333,42 @@ app.get('*', (_req, res) => {
 
 if (!fs.existsSync(THUMB_DIR)) fs.mkdirSync(THUMB_DIR, { recursive: true });
 
-app.listen(PORT, () => {
-  console.log(`Lumina running on http://0.0.0.0:${PORT}`);
+function curationCounts() {
+  return {
+    albums: db.prepare('SELECT COUNT(*) AS c FROM albums').get().c,
+    favorites: db.prepare('SELECT COUNT(*) AS c FROM favorites').get().c,
+    albumItems: db.prepare('SELECT COUNT(*) AS c FROM album_items').get().c,
+  };
+}
+
+function shutdown(signal) {
+  console.log(`Received ${signal}, flushing database…`);
   try {
+    db.flush();
+    db.close();
+  } catch (err) {
+    console.error('Shutdown flush failed:', err.message);
+  }
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+app.listen(PORT, () => {
+  const dataDir = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+  console.log(`Lumina running on http://0.0.0.0:${PORT}`);
+  console.log(`Database: ${path.join(dataDir, 'lumina.db')}`);
+  try {
+    db.flush();
+    const counts = curationCounts();
+    console.log(
+      `Curation: ${counts.albums} albums, ${counts.favorites} favorites, ${counts.albumItems} album items`
+    );
     backupDatabase('startup');
     const config = loadConfig();
     console.log(`Media sources: ${(config.mediaPaths || []).map((p) => p.name).join(', ') || 'none'}`);
+    waitForMediaPaths(config);
     const result = scanMedia(config);
     if (result.status === 'skipped') {
       console.warn(`Initial scan skipped (${result.reason}) — library unchanged`);

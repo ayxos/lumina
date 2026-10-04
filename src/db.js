@@ -12,6 +12,14 @@ if (!fs.existsSync(DATA_DIR)) {
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
+db.pragma('busy_timeout = 5000');
+
+/** Flush WAL into the main DB file so curation survives crashes/restarts. */
+function flushDatabase() {
+  db.pragma('wal_checkpoint(TRUNCATE)');
+}
+
+db.flush = flushDatabase;
 
 function columnExists(table, column) {
   return db.prepare(

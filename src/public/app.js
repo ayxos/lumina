@@ -181,10 +181,34 @@ function refreshCardSelection() {
   });
 }
 
+function clearSelection() {
+  state.selected.clear();
+  updateSelectionUI();
+  refreshCardSelection();
+}
+
+function inAlbumDetail() {
+  return state.view === 'albums' && state.currentAlbum;
+}
+
 function updateSelectionUI() {
   const n = state.selected.size;
-  els.selectionBar.hidden = n === 0;
-  els.selectionCount.textContent = `${n} selected`;
+  const albumMode = !!inAlbumDetail();
+  els.selectionBar.hidden = n === 0 && !albumMode;
+  els.selectionCount.textContent = n ? `${n} selected` : '';
+  els.selectionCount.hidden = n === 0;
+
+  $('#add-to-album-btn').hidden = albumMode || n === 0;
+  $('#copy-to-album-btn').hidden = !albumMode || n === 0;
+  $('#move-to-album-btn').hidden = !albumMode || n === 0;
+  $('#remove-from-album-btn').hidden = !albumMode || n === 0;
+  $('#download-selected-btn').hidden = n === 0;
+  $('#select-all-btn').hidden = !albumMode;
+  $('#clear-selection').hidden = n === 0;
+
+  if (albumMode && n === 0) {
+    els.selectionBar.hidden = false;
+  }
 }
 
 async function loadMedia(append = false) {
@@ -270,6 +294,7 @@ async function openAlbum(id) {
   try {
     const album = await api(`/api/albums/${id}`);
     state.currentAlbum = album;
+    clearSelection();
     $('#album-detail-name').textContent = album.name;
     $('#album-detail-count').textContent = `${album.items.length} items`;
     els.albumsList.hidden = true;
@@ -278,7 +303,7 @@ async function openAlbum(id) {
     els.albumGrid.innerHTML = '';
     album.items.forEach((item) => {
       els.albumGrid.appendChild(renderCard(item, {
-        selectable: false,
+        selectable: true,
         onClick: (it) => {
           state.lightboxItems = album.items;
           state.lightboxIndex = album.items.findIndex((x) => x.id === it.id);
@@ -286,6 +311,7 @@ async function openAlbum(id) {
         },
       }));
     });
+    updateSelectionUI();
   } catch (err) {
     toast(err.message);
   }
@@ -385,7 +411,8 @@ function showModal(title, bodyHtml, onConfirm) {
   els.modal.hidden = false;
   const confirm = $('#modal-confirm');
   const cancel = $('#modal-cancel');
-  const cleanup = () => { els.modal.hidden = true; confirm.onclick = null; };
+  confirm.hidden = false;
+  const cleanup = () => { els.modal.hidden = true; confirm.onclick = null; confirm.hidden = false; };
   cancel.onclick = cleanup;
   $('#modal-backdrop').onclick = cleanup;
   confirm.onclick = async () => {
@@ -409,30 +436,121 @@ function showNewAlbumModal(mediaIds = []) {
   setTimeout(() => $('#album-name-input')?.focus(), 50);
 }
 
-async function showAddToAlbumModal(mediaIds) {
-  if (!state.albums.length) {
-    showNewAlbumModal(mediaIds);
+async function showAlbumPickerModal(mediaIds, { mode = 'add', excludeAlbumId = null } = {}) {
+  const albums = state.albums.filter((a) => String(a.id) !== String(excludeAlbumId));
+  if (!albums.length) {
+    showModal('New album', '<input id="album-name-input" placeholder="Album name" autofocus>', async () => {
+      const name = $('#album-name-input').value.trim();
+      if (!name) return toast('Name required');
+      const album = await api('/api/albums', { method: 'POST', body: { name } });
+      await api(`/api/albums/${album.id}/items`, { method: 'POST', body: { mediaIds } });
+      if (mode === 'move' && state.currentAlbum) {
+        await api(`/api/albums/${state.currentAlbum.id}/items/remove`, {
+          method: 'POST',
+          body: { mediaIds },
+        });
+        toast(`Moved ${mediaIds.length} file(s) to "${name}"`);
+        clearSelection();
+        openAlbum(state.currentAlbum.id);
+      } else {
+        toast(`${mode === 'copy' ? 'Copied' : 'Added'} ${mediaIds.length} file(s) to "${name}"`);
+        clearSelection();
+        loadAlbums();
+      }
+    });
+    setTimeout(() => $('#album-name-input')?.focus(), 50);
     return;
   }
-  const items = state.albums.map((a) =>
+  const titles = { add: 'Add to album', copy: 'Copy to album', move: 'Move to album' };
+  const items = albums.map((a) =>
     `<div class="album-picker-item" data-id="${a.id}">${esc(a.name)} (${a.item_count})</div>`
   ).join('');
   const confirmBtn = $('#modal-confirm');
   confirmBtn.hidden = true;
-  showModal('Add to album', `<div class="album-picker">${items}</div>`, async () => {});
+  showModal(titles[mode] || titles.add, `<div class="album-picker">${items}</div>`, async () => {});
   $$('.album-picker-item').forEach((el) => {
     el.addEventListener('click', async () => {
       const albumId = el.dataset.id;
-      await api(`/api/albums/${albumId}/items`, { method: 'POST', body: { mediaIds } });
-      toast(`Added ${mediaIds.length} file(s) to album`);
-      els.modal.hidden = true;
-      confirmBtn.hidden = false;
-      state.selected.clear();
-      updateSelectionUI();
-      refreshCardSelection();
-      loadAlbums();
+      try {
+        await api(`/api/albums/${albumId}/items`, { method: 'POST', body: { mediaIds } });
+        if (mode === 'move' && state.currentAlbum) {
+          await api(`/api/albums/${state.currentAlbum.id}/items/remove`, {
+            method: 'POST',
+            body: { mediaIds },
+          });
+          toast(`Moved ${mediaIds.length} file(s)`);
+          clearSelection();
+          openAlbum(state.currentAlbum.id);
+        } else {
+          toast(`${mode === 'copy' ? 'Copied' : 'Added'} ${mediaIds.length} file(s) to album`);
+          clearSelection();
+          loadAlbums();
+        }
+        els.modal.hidden = true;
+        confirmBtn.hidden = false;
+      } catch (err) {
+        toast(err.message);
+      }
     });
   });
+}
+
+async function showAddToAlbumModal(mediaIds) {
+  if (!state.albums.length) await loadAlbums();
+  if (!state.albums.length) {
+    showNewAlbumModal(mediaIds);
+    return;
+  }
+  showAlbumPickerModal(mediaIds, { mode: 'add' });
+}
+
+async function downloadSelected(mediaIds) {
+  try {
+    const res = await fetch('/api/media/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mediaIds }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || res.statusText);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'selection.zip';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast(`Downloading ${mediaIds.length} file(s)`);
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+async function removeSelectedFromAlbum(mediaIds) {
+  if (!state.currentAlbum) return;
+  if (!confirm(`Remove ${mediaIds.length} item(s) from this album?`)) return;
+  try {
+    await api(`/api/albums/${state.currentAlbum.id}/items/remove`, {
+      method: 'POST',
+      body: { mediaIds },
+    });
+    toast(`Removed ${mediaIds.length} item(s)`);
+    clearSelection();
+    openAlbum(state.currentAlbum.id);
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+function selectAllInAlbum() {
+  if (!state.currentAlbum) return;
+  state.currentAlbum.items.forEach((item) => state.selected.add(item.id));
+  updateSelectionUI();
+  refreshCardSelection();
 }
 
 function countActiveFilters() {
@@ -470,6 +588,8 @@ function closeFilters() {
 
 function switchView(view) {
   state.view = view;
+  state.currentAlbum = null;
+  clearSelection();
   $$('.nav-item').forEach((n) => n.classList.toggle('active', n.dataset.view === view));
   $$('.view').forEach((v) => v.classList.remove('active'));
   $(`#view-${view}`).classList.add('active');
@@ -568,17 +688,42 @@ function setupEvents() {
     if (state.selected.size) showAddToAlbumModal([...state.selected]);
   });
 
-  $('#clear-selection').addEventListener('click', () => {
-    state.selected.clear();
-    updateSelectionUI();
-    refreshCardSelection();
+  $('#copy-to-album-btn').addEventListener('click', async () => {
+    if (!state.selected.size || !state.currentAlbum) return;
+    if (!state.albums.length) await loadAlbums();
+    showAlbumPickerModal([...state.selected], {
+      mode: 'copy',
+      excludeAlbumId: state.currentAlbum.id,
+    });
   });
+
+  $('#move-to-album-btn').addEventListener('click', async () => {
+    if (!state.selected.size || !state.currentAlbum) return;
+    if (!state.albums.length) await loadAlbums();
+    showAlbumPickerModal([...state.selected], {
+      mode: 'move',
+      excludeAlbumId: state.currentAlbum.id,
+    });
+  });
+
+  $('#remove-from-album-btn').addEventListener('click', () => {
+    if (state.selected.size) removeSelectedFromAlbum([...state.selected]);
+  });
+
+  $('#download-selected-btn').addEventListener('click', () => {
+    if (state.selected.size) downloadSelected([...state.selected]);
+  });
+
+  $('#select-all-btn').addEventListener('click', selectAllInAlbum);
+
+  $('#clear-selection').addEventListener('click', clearSelection);
 
   $('#back-albums').addEventListener('click', () => {
     els.albumDetail.hidden = true;
     els.albumsList.hidden = false;
     $('.albums-header').hidden = false;
     state.currentAlbum = null;
+    clearSelection();
   });
 
   $('#download-album-btn').addEventListener('click', () => {

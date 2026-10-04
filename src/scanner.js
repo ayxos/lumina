@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { execFile } = require('child_process');
+const { execFile, execFileSync } = require('child_process');
 const { promisify } = require('util');
 const sharp = require('sharp');
 const db = require('./db');
@@ -40,6 +40,36 @@ function loadConfig() {
   const configPath = process.env.CONFIG_PATH || path.join(__dirname, '..', 'config', 'settings.json');
   const raw = fs.readFileSync(configPath, 'utf8');
   return JSON.parse(raw);
+}
+
+function mediaPathReady(dir) {
+  try {
+    return fs.existsSync(dir) && fs.readdirSync(dir).some((name) => !name.startsWith('.'));
+  } catch {
+    return false;
+  }
+}
+
+function waitForMediaPaths(config) {
+  const sources = config.mediaPaths || [];
+  if (!sources.length) return;
+
+  const maxSec = parseInt(process.env.MEDIA_MOUNT_WAIT_SEC || '120', 10);
+  const deadline = Date.now() + maxSec * 1000;
+
+  while (Date.now() < deadline) {
+    const pending = sources.filter((src) => !mediaPathReady(src.path));
+    if (!pending.length) {
+      console.log('Media mounts ready');
+      return;
+    }
+    console.warn(
+      `Waiting for media mounts (${pending.map((p) => p.path).join(', ')})…`
+    );
+    execFileSync('sleep', ['2']);
+  }
+
+  console.warn(`Media mounts not ready after ${maxSec}s — starting anyway`);
 }
 
 function walkDir(dir, allowed, results = []) {
@@ -133,6 +163,8 @@ async function generateThumbnail(filePath, mediaId, size, mediaType) {
 function backupDatabase(reason) {
   if (!fs.existsSync(DB_PATH)) return;
   if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  // Flush WAL first — copying the main file alone drops recent albums/favorites.
+  db.flush();
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const backupPath = path.join(BACKUP_DIR, `lumina-${reason}-${stamp}.db`);
   fs.copyFileSync(DB_PATH, backupPath);
@@ -224,6 +256,7 @@ function scanMedia(config) {
 
   lastScan = new Date().toISOString();
   scanning = false;
+  db.flush();
   return { status: 'done', total, removed: staleIds.length, scannedAt: lastScan };
 }
 
@@ -308,6 +341,7 @@ function buildMediaQuery(filters) {
 
 module.exports = {
   loadConfig,
+  waitForMediaPaths,
   scanMedia,
   getScanStatus,
   generateThumbnail,

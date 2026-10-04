@@ -60,6 +60,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex-shrink: 0;
 }
 
 .nav-item {
@@ -87,6 +88,8 @@ body {
   padding: 20px 16px;
   overflow-y: auto;
   border-top: 1px solid var(--border);
+  flex: 1;
+  min-height: 0;
 }
 
 .filters-body {
@@ -180,6 +183,8 @@ body {
   justify-content: space-between;
   font-size: 0.78rem;
   color: var(--text-muted);
+  margin-top: auto;
+  flex-shrink: 0;
 }
 
 /* Main */
@@ -238,6 +243,8 @@ body {
   margin-left: auto;
   font-size: 0.85rem;
   color: var(--text-muted);
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .content {
@@ -301,6 +308,8 @@ body {
   color: white;
   font-size: 0.75rem;
 }
+
+#album-grid .card-check { opacity: 0.85; }
 
 .card-thumb {
   aspect-ratio: 1;
@@ -694,15 +703,15 @@ body.filters-open {
   display: none !important;
 }
 
-/* Desktop: filters sit in the left sidebar column */
+/* Desktop: filters live inside the sidebar below nav */
 @media (min-width: 769px) {
   #filters-panel {
-    position: fixed;
-    left: 0;
-    top: 168px;
-    bottom: 46px;
-    width: var(--sidebar-w);
-    z-index: 10;
+    position: relative;
+    left: auto;
+    top: auto;
+    bottom: auto;
+    width: auto;
+    z-index: auto;
     margin-top: 0;
   }
 }
